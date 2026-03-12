@@ -8,19 +8,323 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-      - uses: android-actions/setup-android@v3
-      - name: Build APK
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate full Android project
         run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip
-          unzip -q gradle-8.4-bin.zip
-          export PATH=$PATH:$(pwd)/gradle-8.4/bin
+          # settings.gradle
+          cat > settings.gradle << 'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "AnimeSama"
+          include ':app'
+          EOF
+
+          # build.gradle racine
+          cat > build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application' version '8.2.0' apply false
+          }
+          EOF
+
+          # gradle.properties
+          cat > gradle.properties << 'EOF'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx2048m
+          EOF
+
+          # app/build.gradle
+          mkdir -p app
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              compileSdk 34
+              namespace 'com.animesama.app'
+              defaultConfig {
+                  applicationId "com.animesama.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+          }
+          EOF
+
+          # AndroidManifest.xml
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.animesama.app">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="AnimeSama"
+                  android:theme="@style/AppTheme"
+                  android:usesCleartextTraffic="true"
+                  android:hardwareAccelerated="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # styles.xml
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/styles.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+                  <item name="android:windowBackground">#0A0A14</item>
+                  <item name="android:statusBarColor">#0A0A14</item>
+                  <item name="android:navigationBarColor">#0A0A14</item>
+                  <item name="colorPrimary">#E63946</item>
+                  <item name="colorPrimaryDark">#0A0A14</item>
+                  <item name="colorAccent">#E63946</item>
+              </style>
+          </resources>
+          EOF
+
+          # strings.xml
+          cat > app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">AnimeSama</string>
+          </resources>
+          EOF
+
+          # MainActivity.java
+          mkdir -p app/src/main/java/com/animesama/app
+          cat > app/src/main/java/com/animesama/app/MainActivity.java << 'EOF'
+          package com.animesama.app;
+          import android.annotation.SuppressLint;
+          import android.app.AlertDialog;
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.os.Bundle;
+          import android.view.KeyEvent;
+          import android.view.View;
+          import android.webkit.CookieManager;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.EditText;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.ProgressBar;
+          import android.widget.TextView;
+          import android.widget.Toast;
+          import androidx.appcompat.app.AppCompatActivity;
+          import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+          public class MainActivity extends AppCompatActivity {
+              private WebView webView;
+              private ProgressBar progressBar;
+              private SwipeRefreshLayout swipeRefresh;
+              private SharedPreferences prefs;
+              private static final String DEFAULT_URL = "https://anime-sama.to/";
+              private static final String PREF_URL = "url";
+              @Override @SuppressLint("SetJavaScriptEnabled")
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  prefs = getSharedPreferences("as", Context.MODE_PRIVATE);
+                  FrameLayout root = new FrameLayout(this);
+                  root.setBackgroundColor(Color.parseColor("#0A0A14"));
+                  swipeRefresh = new SwipeRefreshLayout(this);
+                  swipeRefresh.setColorSchemeColors(Color.parseColor("#E63946"));
+                  swipeRefresh.setProgressBackgroundColorSchemeColor(Color.parseColor("#111122"));
+                  webView = new WebView(this);
+                  swipeRefresh.addView(webView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+                  root.addView(swipeRefresh, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+                  progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+                  progressBar.setMax(100);
+                  progressBar.setVisibility(View.GONE);
+                  FrameLayout.LayoutParams pbp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, 8);
+                  root.addView(progressBar, pbp);
+                  TextView btnBack = new TextView(this);
+                  btnBack.setText("←");
+                  btnBack.setTextSize(24);
+                  btnBack.setGravity(android.view.Gravity.CENTER);
+                  btnBack.setBackgroundColor(Color.parseColor("#CC1A1A2F"));
+                  btnBack.setTextColor(Color.WHITE);
+                  FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(130, 130);
+                  bp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
+                  bp.setMargins(32, 0, 0, 80);
+                  root.addView(btnBack, bp);
+                  TextView btnUrl = new TextView(this);
+                  btnUrl.setText("🔗");
+                  btnUrl.setTextSize(22);
+                  btnUrl.setGravity(android.view.Gravity.CENTER);
+                  btnUrl.setBackgroundColor(Color.parseColor("#E63946"));
+                  FrameLayout.LayoutParams up = new FrameLayout.LayoutParams(140, 140);
+                  up.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.END;
+                  up.setMargins(0, 0, 32, 70);
+                  root.addView(btnUrl, up);
+                  setContentView(root);
+                  WebSettings s = webView.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setLoadWithOverviewMode(true);
+                  s.setUseWideViewPort(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  s.setUserAgentString("Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36");
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                  webView.setWebChromeClient(new WebChromeClient() {
+                      @Override public void onProgressChanged(WebView v, int p) {
+                          if (p < 100) { progressBar.setVisibility(View.VISIBLE); progressBar.setProgress(p); }
+                          else { progressBar.setVisibility(View.GONE); swipeRefresh.setRefreshing(false); }
+                      }
+                  });
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                          v.loadUrl(r.getUrl().toString()); return true;
+                      }
+                      @Override public void onPageFinished(WebView v, String url) {
+                          swipeRefresh.setRefreshing(false);
+                          v.loadUrl("javascript:(function(){var s=document.createElement('style');s.innerHTML='[class*=\"ad\"],[id*=\"ad\"]{display:none!important}';document.head.appendChild(s);})();");
+                      }
+                  });
+                  swipeRefresh.setOnRefreshListener(() -> webView.reload());
+                  btnBack.setOnClickListener(v -> { if (webView.canGoBack()) webView.goBack(); });
+                  btnUrl.setOnClickListener(v -> showUrlDialog());
+                  webView.loadUrl(prefs.getString(PREF_URL, DEFAULT_URL));
+              }
+              private void showUrlDialog() {
+                  LinearLayout layout = new LinearLayout(this);
+                  layout.setOrientation(LinearLayout.VERTICAL);
+                  layout.setPadding(60, 50, 60, 30);
+                  layout.setBackgroundColor(Color.parseColor("#111122"));
+                  TextView lbl = new TextView(this);
+                  lbl.setText("Nouvelle URL du site :");
+                  lbl.setTextColor(Color.parseColor("#9090BB"));
+                  lbl.setTextSize(14);
+                  lbl.setPadding(0, 0, 0, 20);
+                  layout.addView(lbl);
+                  EditText input = new EditText(this);
+                  input.setText(prefs.getString(PREF_URL, DEFAULT_URL));
+                  input.setTextColor(Color.WHITE);
+                  input.setBackgroundColor(Color.parseColor("#1A1A2F"));
+                  input.setPadding(24, 20, 24, 20);
+                  input.setSingleLine(true);
+                  layout.addView(input);
+                  new AlertDialog.Builder(this)
+                      .setTitle("🔗 Changer l'URL")
+                      .setView(layout)
+                      .setPositiveButton("✅ Sauvegarder", (d, w) -> {
+                          String url = input.getText().toString().trim();
+                          if (!url.startsWith("http")) url = "https://" + url;
+                          prefs.edit().putString(PREF_URL, url).apply();
+                          webView.loadUrl(url);
+                          Toast.makeText(this, "URL mise a jour!", Toast.LENGTH_SHORT).show();
+                      })
+                      .setNegativeButton("Annuler", null)
+                      .setNeutralButton("Reset", (d, w) -> {
+                          prefs.edit().putString(PREF_URL, DEFAULT_URL).apply();
+                          webView.loadUrl(DEFAULT_URL);
+                      }).show();
+              }
+              @Override public boolean onKeyDown(int k, KeyEvent e) {
+                  if (k == KeyEvent.KEYCODE_BACK && webView.canGoBack()) { webView.goBack(); return true; }
+                  return super.onKeyDown(k, e);
+              }
+              @Override protected void onPause() { super.onPause(); webView.onPause(); }
+              @Override protected void onResume() { super.onResume(); webView.onResume(); }
+              @Override protected void onDestroy() { webView.destroy(); super.onDestroy(); }
+          }
+          EOF
+
+          # Icône PNG minimale
+          mkdir -p app/src/main/res/mipmap-hdpi
+          mkdir -p app/src/main/res/mipmap-mdpi
+          mkdir -p app/src/main/res/mipmap-xhdpi
+          mkdir -p app/src/main/res/mipmap-xxhdpi
+          mkdir -p app/src/main/res/mipmap-xxxhdpi
+          python3 -c "
+          import struct, zlib, os
+          def png(size):
+              px=[]
+              c=size//2
+              r=int(size*0.42)
+              for y in range(size):
+                  row=[]
+                  for x in range(size):
+                      d=((x-c)**2+(y-c)**2)**0.5
+                      if d<r: row+=[int(230*(1-d/r*0.3)),int(57*(1-d/r*0.3)),int(70*(1-d/r*0.3)),255]
+                      else: row+=[10,10,20,255]
+                  px.append(bytes(row))
+              def ck(t,d):
+                  c2=t+d
+                  return struct.pack('>I',len(d))+c2+struct.pack('>I',zlib.crc32(c2)&0xffffffff)
+              raw=b''.join(b'\x00'+r for r in px)
+              return b'\x89PNG\r\n\x1a\n'+ck(b'IHDR',struct.pack('>IIBBBBB',size,size,8,6,0,0,0))+ck(b'IDAT',zlib.compress(raw,9))+ck(b'IEND',b'')
+          sizes={'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          for f,s in sizes.items():
+              p=png(s)
+              open(f'app/src/main/res/{f}/ic_launcher.png','wb').write(p)
+              open(f'app/src/main/res/{f}/ic_launcher_round.png','wb').write(p)
+          print('Icons done')
+          "
+
+          # Gradle wrapper
           mkdir -p gradle/wrapper
-          curl -sL -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar
-          gradle assembleDebug
+          curl -sL -o gradle/wrapper/gradle-wrapper.jar \
+            https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar
+          
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+
+          curl -sL -o gradlew https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradlew
+          chmod +x gradlew
+
+      - name: Build APK
+        run: ./gradlew assembleDebug --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
           name: AnimeSama-APK
